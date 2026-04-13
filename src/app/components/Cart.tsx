@@ -112,7 +112,7 @@ export function Cart() {
                             <Plus className="w-4 h-4" />
                           </button>
                         </div>
-                        <button onClick={() => removeItem(item.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition">
+                        <button onClick={() => removeFromCart(item.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition">
                           <Trash2 className="w-5 h-5" />
                         </button>
                       </div>

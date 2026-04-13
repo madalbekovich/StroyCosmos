@@ -39,7 +39,7 @@ export function Orders() {
       .select("*")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
-      .then(({ data }) => {
+      .then(({ data }: { data: Order[] | null }) => {
         setOrders(data ?? []);
         setLoading(false);
       });
