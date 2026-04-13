@@ -3,7 +3,8 @@ import { useNavigate } from "react-router";
 import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useUser } from "@/hooks/useUser";
-
+import { useCart } from "@/context/CartContext";
+import type { CartItem } from "@/context/CartContext";
 
 type CartItem = {
   id: number;
@@ -17,20 +18,12 @@ type CartItem = {
 export function Cart() {
   const navigate = useNavigate();
   const { user } = useUser();
-  const { cartItems, removeFromCart, clearCart } = useCart();
-
+  const { cartItems, updateQuantity, removeFromCart, clearCart } = useCart();
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", address: "" });
 
-  const updateQuantity = (id: number, newQuantity: number) => {
-    if (newQuantity < 1) return;
-    setCartItems(cartItems.map((item) => item.id === id ? { ...item, quantity: newQuantity } : item));
-  };
-
-  const removeItem = (id: number) => setCartItems(cartItems.filter((item) => item.id !== id));
-
-  const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const subtotal = cartItems.reduce((sum: number, item: CartItem) => sum + item.price * item.quantity, 0);
   const deliveryCost = subtotal > 5000 ? 0 : 500;
   const total = subtotal + deliveryCost;
 
@@ -38,8 +31,7 @@ export function Cart() {
     if (!form.name || !form.phone) return;
     setSubmitting(true);
 
-    // 1. Сохраняем заказ в Supabase
-    const orderItems = cartItems.map((item) => ({
+    const orderItems = cartItems.map((item: CartItem) => ({
       id: item.id,
       name: item.name,
       specs: item.specs,
@@ -47,7 +39,7 @@ export function Cart() {
       quantity: item.quantity,
     }));
 
-    const { error } = await supabase.from("orders").insert({
+    await supabase.from("orders").insert({
       user_id: user?.id ?? null,
       items: orderItems,
       total,
@@ -57,16 +49,11 @@ export function Cart() {
       status: "new",
     });
 
-    if (error) {
-      console.error("Ошибка сохранения заказа:", error);
-    }
-
-    // 2. Формируем сообщение для WhatsApp
     const itemsList = cartItems
-      .map((item) => `• ${item.name} (${item.specs}) × ${item.quantity} = ${(item.price * item.quantity).toLocaleString()} ₽`)
+      .map((item: CartItem) => `• ${item.name} (${item.specs}) × ${item.quantity} = ${(item.price * item.quantity).toLocaleString()} ₽`)
       .join("\n");
 
-    const message = `🛒 *Новый заказ с сайта СтройКосмос*\n\n` +
+    const message = `🛒 *Новый заказ с сайта СтройМаг*\n\n` +
       `👤 Имя: ${form.name}\n` +
       `📞 Телефон: ${form.phone}\n` +
       `📍 Адрес: ${form.address || "не указан"}\n\n` +
@@ -74,13 +61,8 @@ export function Cart() {
       `💰 Итого: ${total.toLocaleString()} ₽` +
       (deliveryCost === 0 ? " (доставка бесплатно)" : ` (включая доставку ${deliveryCost} ₽)`);
 
-    const phone = "996500030371";
-    const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    window.open(`https://wa.me/996500030371?text=${encodeURIComponent(message)}`, "_blank");
 
-    // 3. Открываем WhatsApp
-    window.open(whatsappUrl, "_blank");
-
-    // 4. Очищаем корзину и закрываем модалку
     clearCart();
     setShowModal(false);
     setSubmitting(false);

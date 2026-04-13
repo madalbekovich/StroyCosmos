@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, useState } from "react";
+import type { ReactNode } from "react";
 
 export type CartItem = {
   id: number;
@@ -33,9 +34,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const removeFromCart = (id: number) => {
-    setCartItems((prev) => prev.filter((i) => i.id !== id));
-  };
+  const removeFromCart = (id: number) => setCartItems((prev) => prev.filter((i) => i.id !== id));
 
   const updateQuantity = (id: number, quantity: number) => {
     if (quantity < 1) return;
