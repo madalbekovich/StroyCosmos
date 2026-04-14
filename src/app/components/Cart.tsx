@@ -6,15 +6,6 @@ import { useUser } from "@/hooks/useUser";
 import { useCart } from "@/context/CartContext";
 import type { CartItem } from "@/context/CartContext";
 
-type CartItem = {
-  id: number;
-  name: string;
-  specs: string;
-  price: number;
-  quantity: number;
-  image: string;
-};
-
 export function Cart() {
   const navigate = useNavigate();
   const { user } = useUser();
