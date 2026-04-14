@@ -20,6 +20,8 @@ type Product = {
   image: string;
 };
 
+const PAGE_SIZE = 9;
+
 export function Catalog() {
   const { category } = useParams();
   const navigate = useNavigate();
@@ -33,23 +35,28 @@ export function Catalog() {
   const [error, setError] = useState<string | null>(null);
   const [addedIds, setAddedIds] = useState<number[]>([]);
   const [sortBy, setSortBy] = useState("default");
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
-  // Загружаем уникальные бренды из Supabase
+  // Загружаем бренды
   useEffect(() => {
-    const fetchBrands = async () => {
-      const { data } = await supabase
-        .from("products")
-        .select("brand")
-        .not("brand", "is", null)
-        .neq("brand", "");
-
-      if (data) {
-        const unique = [...new Set(data.map((d) => d.brand).filter(Boolean))].sort();
-        setBrands(unique);
-      }
-    };
-    fetchBrands();
+    supabase
+      .from("products")
+      .select("brand")
+      .not("brand", "is", null)
+      .neq("brand", "")
+      .then(({ data }) => {
+        if (data) {
+          const unique = [...new Set(data.map((d: { brand: string }) => d.brand).filter(Boolean))].sort() as string[];
+          setBrands(unique);
+        }
+      });
   }, []);
+
+  // Сбрасываем страницу при смене фильтров
+  useEffect(() => {
+    setPage(1);
+  }, [category, selectedBrands, priceRange, sortBy]);
 
   // Загружаем товары
   useEffect(() => {
@@ -57,32 +64,36 @@ export function Catalog() {
       setLoading(true);
       setError(null);
 
+      const from = (page - 1) * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
       let query = supabase
         .from("products")
-        .select("*")
+        .select("*", { count: "exact" })
         .gte("price", priceRange[0])
-        .lte("price", priceRange[1]);
+        .lte("price", priceRange[1])
+        .range(from, to);
 
-      // Фильтр по категории — ищем вхождение т.к. категория хранится как "А | Б | В"
       if (category) query = query.ilike("category", `%${category}%`);
       if (selectedBrands.length > 0) query = query.in("brand", selectedBrands);
 
-      // Сортировка
       if (sortBy === "price_asc") query = query.order("price", { ascending: true });
       else if (sortBy === "price_desc") query = query.order("price", { ascending: false });
       else if (sortBy === "rating") query = query.order("rating", { ascending: false });
       else query = query.order("id", { ascending: false });
 
-      const { data, error } = await query.returns<Product[]>();
+      const { data, error, count } = await query.returns<Product[]>();
 
       if (error) setError("Не удалось загрузить товары");
-      else setProducts(data ?? []);
-
+      else {
+        setProducts(data ?? []);
+        setTotalCount(count ?? 0);
+      }
       setLoading(false);
     };
 
     fetchProducts();
-  }, [category, selectedBrands, priceRange, sortBy]);
+  }, [category, selectedBrands, priceRange, sortBy, page]);
 
   const handleAddToCart = (product: Product) => {
     addToCart({
@@ -104,10 +115,21 @@ export function Catalog() {
     );
   };
 
-  // Заголовок — берём последний элемент из category если есть
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+
   const title = category
     ? category.split("|").pop()?.trim() || "Каталог"
     : "Все товары";
+
+  const getPageNumbers = () => {
+    return Array.from({ length: totalPages }, (_, i) => i + 1)
+      .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
+      .reduce<(number | "...")[]>((acc, p, i, arr) => {
+        if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push("...");
+        acc.push(p);
+        return acc;
+      }, []);
+  };
 
   return (
     <div className="bg-gray-50 min-h-screen">
@@ -115,7 +137,7 @@ export function Catalog() {
         <div className="mb-8">
           <h1 className="font-bold mb-2">{title}</h1>
           <p className="text-gray-600">
-            {loading ? "Загрузка..." : `Найдено товаров: ${products.length}`}
+            {loading ? "Загрузка..." : `Найдено товаров: ${totalCount}`}
           </p>
         </div>
 
@@ -128,7 +150,6 @@ export function Catalog() {
                 <h2 className="font-semibold text-lg">Фильтры</h2>
               </div>
 
-              {/* Цена */}
               <div className="mb-6 pb-6 border-b border-gray-200">
                 <h3 className="font-medium mb-4">Цена</h3>
                 <div className="space-y-3">
@@ -138,9 +159,7 @@ export function Catalog() {
                     max="50000"
                     step="500"
                     value={priceRange[1]}
-                    onChange={(e) =>
-                      setPriceRange([priceRange[0], parseInt(e.target.value)])
-                    }
+                    onChange={(e) => setPriceRange([priceRange[0], parseInt(e.target.value)])}
                     className="w-full accent-orange-500"
                   />
                   <div className="flex justify-between text-sm text-gray-600">
@@ -150,16 +169,12 @@ export function Catalog() {
                 </div>
               </div>
 
-              {/* Бренды из БД */}
               {brands.length > 0 && (
                 <div className="mb-6 pb-6 border-b border-gray-200">
                   <h3 className="font-medium mb-4">Бренд</h3>
                   <div className="space-y-2 max-h-60 overflow-y-auto">
                     {brands.map((brand) => (
-                      <label
-                        key={brand}
-                        className="flex items-center gap-2 cursor-pointer"
-                      >
+                      <label key={brand} className="flex items-center gap-2 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={selectedBrands.includes(brand)}
@@ -201,21 +216,13 @@ export function Catalog() {
               <div className="flex gap-2">
                 <button
                   onClick={() => setViewMode("grid")}
-                  className={`p-2 rounded ${
-                    viewMode === "grid"
-                      ? "bg-orange-500 text-white"
-                      : "bg-white text-gray-700"
-                  }`}
+                  className={`p-2 rounded ${viewMode === "grid" ? "bg-orange-500 text-white" : "bg-white text-gray-700"}`}
                 >
                   <Grid className="w-5 h-5" />
                 </button>
                 <button
                   onClick={() => setViewMode("list")}
-                  className={`p-2 rounded ${
-                    viewMode === "list"
-                      ? "bg-orange-500 text-white"
-                      : "bg-white text-gray-700"
-                  }`}
+                  className={`p-2 rounded ${viewMode === "list" ? "bg-orange-500 text-white" : "bg-white text-gray-700"}`}
                 >
                   <List className="w-5 h-5" />
                 </button>
@@ -230,11 +237,8 @@ export function Catalog() {
 
             {loading && (
               <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="bg-white rounded-lg overflow-hidden border border-gray-200 animate-pulse"
-                  >
+                {Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                  <div key={i} className="bg-white rounded-lg overflow-hidden border border-gray-200 animate-pulse">
                     <div className="aspect-square bg-gray-200" />
                     <div className="p-4 space-y-3">
                       <div className="h-4 bg-gray-200 rounded w-3/4" />
@@ -247,28 +251,16 @@ export function Catalog() {
             )}
 
             {!loading && !error && (
-              <div
-                className={
-                  viewMode === "grid"
-                    ? "grid md:grid-cols-2 xl:grid-cols-3 gap-6"
-                    : "flex flex-col gap-4"
-                }
-              >
+              <div className={viewMode === "grid" ? "grid md:grid-cols-2 xl:grid-cols-3 gap-6" : "flex flex-col gap-4"}>
                 {products.map((product, index) => (
                   <motion.div
                     key={product.id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: index * 0.05 }}
-                    className={`bg-white rounded-lg overflow-hidden border border-gray-200 hover:border-orange-500 hover:shadow-lg transition-all group ${
-                      viewMode === "list" ? "flex" : ""
-                    }`}
+                    className={`bg-white rounded-lg overflow-hidden border border-gray-200 hover:border-orange-500 hover:shadow-lg transition-all group ${viewMode === "list" ? "flex" : ""}`}
                   >
-                    <div
-                      className={`bg-gray-100 overflow-hidden ${
-                        viewMode === "list" ? "w-48 h-48 flex-shrink-0" : "aspect-square"
-                      }`}
-                    >
+                    <div className={`bg-gray-100 overflow-hidden ${viewMode === "list" ? "w-48 h-48 flex-shrink-0" : "aspect-square"}`}>
                       {product.image ? (
                         <img
                           src={product.image}
@@ -307,14 +299,12 @@ export function Catalog() {
                         <p className="text-xs text-gray-400 mb-1">{product.brand}</p>
                       )}
 
-                      {product.rating && (
+                      {product.rating > 0 && (
                         <div className="flex items-center gap-2 mb-3">
                           <Star className="w-4 h-4 fill-orange-400 text-orange-400" />
                           <span className="text-sm font-medium">{product.rating}</span>
-                          {product.reviews && (
-                            <span className="text-xs text-gray-500">
-                              ({product.reviews} отзывов)
-                            </span>
+                          {product.reviews > 0 && (
+                            <span className="text-xs text-gray-500">({product.reviews} отзывов)</span>
                           )}
                         </div>
                       )}
@@ -341,18 +331,8 @@ export function Catalog() {
                           } disabled:bg-gray-300 disabled:cursor-not-allowed`}
                         >
                           {addedIds.includes(product.id) ? (
-                            <svg
-                              className="w-5 h-5"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M5 13l4 4L19 7"
-                              />
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                             </svg>
                           ) : (
                             <ShoppingCart className="w-5 h-5" />
@@ -368,9 +348,46 @@ export function Catalog() {
             {!loading && !error && products.length === 0 && (
               <div className="text-center py-12">
                 <p className="text-gray-500 text-lg">Товары не найдены</p>
-                <p className="text-gray-400 text-sm mt-2">
-                  Попробуйте изменить фильтры
-                </p>
+                <p className="text-gray-400 text-sm mt-2">Попробуйте изменить фильтры</p>
+              </div>
+            )}
+
+            {/* Пагинация */}
+            {!loading && !error && totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 mt-8">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  ←
+                </button>
+
+                {getPageNumbers().map((p, i) =>
+                  p === "..." ? (
+                    <span key={`dots-${i}`} className="px-2 text-gray-400">...</span>
+                  ) : (
+                    <button
+                      key={p}
+                      onClick={() => setPage(p as number)}
+                      className={`w-10 h-10 rounded-lg border transition ${
+                        page === p
+                          ? "bg-orange-500 text-white border-orange-500"
+                          : "border-gray-300 hover:bg-gray-50"
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  →
+                </button>
               </div>
             )}
           </div>
