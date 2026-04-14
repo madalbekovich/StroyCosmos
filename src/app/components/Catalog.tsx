@@ -73,7 +73,6 @@ export function Catalog() {
       else if (sortBy === "rating") query = query.order("rating", { ascending: false });
       else query = query.order("id", { ascending: false });
 
-      const { data, error } = await query;
       const { data, error } = await query.returns<Product[]>();
 
       if (error) setError("Не удалось загрузить товары");
