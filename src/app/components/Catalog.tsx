@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router";
-import { Filter, Grid, List, ShoppingCart, Star } from "lucide-react";
+import { Filter, Grid, List, ShoppingCart, Star, Package } from "lucide-react";
 import { motion } from "motion/react";
 import { supabase } from "@/lib/supabase";
 import { useCart } from "@/context/CartContext";
@@ -9,6 +9,7 @@ type Product = {
   id: number;
   name: string;
   category: string;
+  subcategory: string;
   brand: string;
   specs: string;
   tag: string | null;
@@ -18,6 +19,15 @@ type Product = {
   reviews: number;
   in_stock: boolean;
   image: string;
+};
+
+const SLUG_TO_KEYWORD: Record<string, string> = {
+  "dry-mixes":        "смес",
+  "tools":            "Инструменты",
+  "timber":           "Пиломатериалы",
+  "electrica":        "Электрика",
+  "plumbing":         "Сантехника",
+  "finishing":        "Отделочные",
 };
 
 const PAGE_SIZE = 9;
@@ -38,20 +48,35 @@ export function Catalog() {
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
-  // Загружаем бренды
+  // Определяем ключевое слово для фильтрации
+  // Если slug есть в маппинге — берём его, иначе используем slug как есть
+  const categoryKeyword = category
+    ? (SLUG_TO_KEYWORD[category] ?? category.replace(/-/g, " "))
+    : null;
+
+  // Загружаем бренды (с учётом текущей категории)
   useEffect(() => {
-    supabase
+    let query = supabase
       .from("products")
       .select("brand")
       .not("brand", "is", null)
-      .neq("brand", "")
-      .then(({ data }) => {
-        if (data) {
-          const unique = [...new Set(data.map((d: { brand: string }) => d.brand).filter(Boolean))].sort() as string[];
-          setBrands(unique);
-        }
-      });
-  }, []);
+      .neq("brand", "");
+
+    if (categoryKeyword) {
+      query = query.ilike("category", `%${categoryKeyword}%`);
+    }
+
+    query.then(({ data }) => {
+      if (data) {
+        const unique = [
+          ...new Set(
+            data.map((d: { brand: string }) => d.brand).filter(Boolean)
+          ),
+        ].sort() as string[];
+        setBrands(unique);
+      }
+    });
+  }, [categoryKeyword]);
 
   // Сбрасываем страницу при смене фильтров
   useEffect(() => {
@@ -74,7 +99,11 @@ export function Catalog() {
         .lte("price", priceRange[1])
         .range(from, to);
 
-      if (category) query = query.ilike("category", `%${category}%`);
+      // Фильтрация по категории через ключевое слово
+      if (categoryKeyword) {
+        query = query.ilike("category", `%${categoryKeyword}%`);
+      }
+
       if (selectedBrands.length > 0) query = query.in("brand", selectedBrands);
 
       if (sortBy === "price_asc") query = query.order("price", { ascending: true });
@@ -93,7 +122,7 @@ export function Catalog() {
     };
 
     fetchProducts();
-  }, [category, selectedBrands, priceRange, sortBy, page]);
+  }, [categoryKeyword, selectedBrands, priceRange, sortBy, page]);
 
   const handleAddToCart = (product: Product) => {
     addToCart({
@@ -117,8 +146,9 @@ export function Catalog() {
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
+  // Красивый заголовок из slug
   const title = category
-    ? category.split("|").pop()?.trim() || "Каталог"
+    ? category.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
     : "Все товары";
 
   const getPageNumbers = () => {
@@ -159,7 +189,9 @@ export function Catalog() {
                     max="50000"
                     step="500"
                     value={priceRange[1]}
-                    onChange={(e) => setPriceRange([priceRange[0], parseInt(e.target.value)])}
+                    onChange={(e) =>
+                      setPriceRange([priceRange[0], parseInt(e.target.value)])
+                    }
                     className="w-full accent-orange-500"
                   />
                   <div className="flex justify-between text-sm text-gray-600">
@@ -174,7 +206,10 @@ export function Catalog() {
                   <h3 className="font-medium mb-4">Бренд</h3>
                   <div className="space-y-2 max-h-60 overflow-y-auto">
                     {brands.map((brand) => (
-                      <label key={brand} className="flex items-center gap-2 cursor-pointer">
+                      <label
+                        key={brand}
+                        className="flex items-center gap-2 cursor-pointer"
+                      >
                         <input
                           type="checkbox"
                           checked={selectedBrands.includes(brand)}
@@ -216,13 +251,21 @@ export function Catalog() {
               <div className="flex gap-2">
                 <button
                   onClick={() => setViewMode("grid")}
-                  className={`p-2 rounded ${viewMode === "grid" ? "bg-orange-500 text-white" : "bg-white text-gray-700"}`}
+                  className={`p-2 rounded ${
+                    viewMode === "grid"
+                      ? "bg-orange-500 text-white"
+                      : "bg-white text-gray-700"
+                  }`}
                 >
                   <Grid className="w-5 h-5" />
                 </button>
                 <button
                   onClick={() => setViewMode("list")}
-                  className={`p-2 rounded ${viewMode === "list" ? "bg-orange-500 text-white" : "bg-white text-gray-700"}`}
+                  className={`p-2 rounded ${
+                    viewMode === "list"
+                      ? "bg-orange-500 text-white"
+                      : "bg-white text-gray-700"
+                  }`}
                 >
                   <List className="w-5 h-5" />
                 </button>
@@ -238,7 +281,10 @@ export function Catalog() {
             {loading && (
               <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                  <div key={i} className="bg-white rounded-lg overflow-hidden border border-gray-200 animate-pulse">
+                  <div
+                    key={i}
+                    className="bg-white rounded-lg overflow-hidden border border-gray-200 animate-pulse"
+                  >
                     <div className="aspect-square bg-gray-200" />
                     <div className="p-4 space-y-3">
                       <div className="h-4 bg-gray-200 rounded w-3/4" />
@@ -251,16 +297,31 @@ export function Catalog() {
             )}
 
             {!loading && !error && (
-              <div className={viewMode === "grid" ? "grid md:grid-cols-2 xl:grid-cols-3 gap-6" : "flex flex-col gap-4"}>
+              <div
+                className={
+                  viewMode === "grid"
+                    ? "grid md:grid-cols-2 xl:grid-cols-3 gap-6"
+                    : "flex flex-col gap-4"
+                }
+              >
                 {products.map((product, index) => (
                   <motion.div
                     key={product.id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: index * 0.05 }}
-                    className={`bg-white rounded-lg overflow-hidden border border-gray-200 hover:border-orange-500 hover:shadow-lg transition-all group ${viewMode === "list" ? "flex" : ""}`}
+                    className={`bg-white rounded-lg overflow-hidden border border-gray-200 hover:border-orange-500 hover:shadow-lg transition-all group ${
+                      viewMode === "list" ? "flex" : ""
+                    }`}
                   >
-                    <div className={`bg-gray-100 overflow-hidden ${viewMode === "list" ? "w-48 h-48 flex-shrink-0" : "aspect-square"}`}>
+                    {/* Изображение */}
+                    <div
+                      className={`bg-gray-100 overflow-hidden flex-shrink-0 ${
+                        viewMode === "list"
+                          ? "w-48 h-48"
+                          : "aspect-square"
+                      }`}
+                    >
                       {product.image ? (
                         <img
                           src={product.image}
@@ -274,20 +335,31 @@ export function Catalog() {
                       )}
                     </div>
 
-                    <div className={`p-4 ${viewMode === "list" ? "flex-1" : ""}`}>
-                      <div className="flex items-start justify-between mb-2">
+                    {/* Контент */}
+                    <div
+                      className={`p-4 flex flex-col ${
+                        viewMode === "list" ? "flex-1" : ""
+                      }`}
+                    >
+                      {/* Теги */}
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
                         {product.tag && (
                           <span className="text-xs font-medium text-orange-500 bg-orange-50 px-2 py-1 rounded">
                             {product.tag}
                           </span>
                         )}
-                        {!product.in_stock && (
-                          <span className="text-xs text-red-500 bg-red-50 px-2 py-1 rounded ml-auto">
+                        {!product.in_stock ? (
+                          <span className="text-xs text-red-500 bg-red-50 px-2 py-1 rounded">
                             Нет в наличии
+                          </span>
+                        ) : (
+                          <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
+                            В наличии
                           </span>
                         )}
                       </div>
 
+                      {/* Название */}
                       <h3
                         className="font-semibold mb-1 group-hover:text-orange-500 transition cursor-pointer line-clamp-2"
                         onClick={() => navigate(`/product/${product.id}`)}
@@ -295,28 +367,45 @@ export function Catalog() {
                         {product.name}
                       </h3>
 
+                      {/* Бренд */}
                       {product.brand && (
-                        <p className="text-xs text-gray-400 mb-1">{product.brand}</p>
+                        <p className="text-xs text-gray-400 mb-1">
+                          {product.brand}
+                        </p>
                       )}
 
+                      {/* Категория — только в list-режиме */}
+                      {viewMode === "list" && product.category && (
+                        <div className="flex items-center gap-1 text-xs text-gray-400 mb-2">
+                          <Package className="w-3 h-3" />
+                          <span className="line-clamp-1">{product.category}</span>
+                        </div>
+                      )}
+
+                      {/* Рейтинг */}
                       {product.rating > 0 && (
                         <div className="flex items-center gap-2 mb-3">
                           <Star className="w-4 h-4 fill-orange-400 text-orange-400" />
-                          <span className="text-sm font-medium">{product.rating}</span>
+                          <span className="text-sm font-medium">
+                            {product.rating}
+                          </span>
                           {product.reviews > 0 && (
-                            <span className="text-xs text-gray-500">({product.reviews} отзывов)</span>
+                            <span className="text-xs text-gray-500">
+                              ({product.reviews} отзывов)
+                            </span>
                           )}
                         </div>
                       )}
 
+                      {/* Цена + кнопка */}
                       <div className="flex items-end justify-between mt-auto">
                         <div>
                           <div className="font-bold text-2xl text-gray-900">
-                            {product.price.toLocaleString()} ₽
+                            {Number(product.price).toLocaleString()} ₽
                           </div>
                           {product.old_price && (
                             <div className="text-sm text-gray-400 line-through">
-                              {product.old_price.toLocaleString()} ₽
+                              {Number(product.old_price).toLocaleString()} ₽
                             </div>
                           )}
                         </div>
@@ -331,8 +420,18 @@ export function Catalog() {
                           } disabled:bg-gray-300 disabled:cursor-not-allowed`}
                         >
                           {addedIds.includes(product.id) ? (
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            <svg
+                              className="w-5 h-5"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M5 13l4 4L19 7"
+                              />
                             </svg>
                           ) : (
                             <ShoppingCart className="w-5 h-5" />
@@ -348,7 +447,15 @@ export function Catalog() {
             {!loading && !error && products.length === 0 && (
               <div className="text-center py-12">
                 <p className="text-gray-500 text-lg">Товары не найдены</p>
-                <p className="text-gray-400 text-sm mt-2">Попробуйте изменить фильтры</p>
+                <p className="text-gray-400 text-sm mt-2">
+                  Попробуйте изменить фильтры
+                </p>
+                {/* Дебаг: показываем что ищем */}
+                {categoryKeyword && (
+                  <p className="text-gray-300 text-xs mt-1">
+                    Поиск по: «{categoryKeyword}»
+                  </p>
+                )}
               </div>
             )}
 
@@ -365,7 +472,9 @@ export function Catalog() {
 
                 {getPageNumbers().map((p, i) =>
                   p === "..." ? (
-                    <span key={`dots-${i}`} className="px-2 text-gray-400">...</span>
+                    <span key={`dots-${i}`} className="px-2 text-gray-400">
+                      ...
+                    </span>
                   ) : (
                     <button
                       key={p}
